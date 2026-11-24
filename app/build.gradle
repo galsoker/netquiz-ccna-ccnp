@@ -1,0 +1,44 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.netquiz.app'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.netquiz.app'
+        minSdk 24
+        targetSdk 34
+        versionCode 2
+        versionName '1.1'
+    }
+
+    signingConfigs {
+        release {
+            storeFile file('netquiz-release.jks')
+            storePassword 'netquiz123'
+            keyAlias 'netquiz'
+            keyPassword 'netquiz123'
+            enableV1Signing true
+            enableV2Signing true
+            enableV3Signing true
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    androidResources {
+        noCompress 'js', 'css', 'html'
+    }
+}
