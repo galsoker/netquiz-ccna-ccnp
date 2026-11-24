@@ -20,7 +20,8 @@
   const md = s => esc(s)
     .replace(/&lt;(\/?)sup&gt;/g, '<$1sup>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^\w>])([A-Za-z][A-Za-z0-9.\-]*\+)(?![\w+])/g, '$1<bdi>$2</bdi>');
   const shuffle = a => { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
   const fmt = n => Math.round(n).toLocaleString('he-IL');
   const avg = () => S.quizzes.length ? S.quizzes.reduce((s, q) => s + q.pct, 0) / S.quizzes.length : 0;
@@ -122,7 +123,6 @@
     else if (screen === 'league') app.innerHTML = leagueView() + nav();
     else if (screen === 'stats') app.innerHTML = statsView() + nav();
     bind();
-    if (screen === 'quiz') startTimer();
   }
 
   /* ------------------------------------------------ welcome */
@@ -166,7 +166,7 @@
       ${mode('CCNA', I.modeA, 'a', 'שאלות CCNA', `${nA} שאלות · יסודות, מיתוג, ניתוב ואבטחה`)}
       ${mode('CCNP', I.modeP, 'p', 'שאלות CCNP', `${nP} שאלות · OSPF מתקדם, BGP, MST, אוטומציה`)}
       ${mode('MIX', I.modeM, 'm', 'מעורב', 'שאלות משני המסלולים בסדר אקראי')}</div>
-      <div class="section"><div class="sec-title"><h2>מספר שאלות</h2><span>45 שניות לשאלה</span></div>
+      <div class="section"><div class="sec-title"><h2>מספר שאלות</h2><span>ללא הגבלת זמן</span></div>
       <div class="seg">${[10, 20, 30, 50].map(k => `<button data-n="${k}" class="${n === k ? 'on' : ''}">${k}</button>`).join('')}</div></div>
       <div class="section"><button class="btn primary" data-act="start">התחל מבחן ←</button></div>
       <div class="section"><div class="tile-grid">
@@ -176,7 +176,6 @@
   }
 
   /* ------------------------------------------------ quiz engine */
-  const QTIME = 45;
   function pick(mode, n, weak) {
     let pool = mode === 'MIX' ? Q : Q.filter(q => q.lv === mode);
     if (weak) {
@@ -193,7 +192,7 @@
     const mode = weak ? 'MIX' : S.prefs.mode, n = weak ? 10 : S.prefs.n;
     const items = pick(mode, n, weak);
     if (!items.length) { toast('אין עדיין מספיק נתונים לחיזוק – שחק מבחן רגיל קודם'); return; }
-    quiz = { mode: weak ? 'WEAK' : mode, items, i: 0, sel: -1, done: false, ans: [], streak: 0, best: 0, pts: 0, t: QTIME, start: Date.now() };
+    quiz = { mode: weak ? 'WEAK' : mode, items, i: 0, sel: -1, done: false, ans: [], streak: 0, best: 0, pts: 0, start: Date.now() };
     go('quiz');
   }
   const modeName = m => ({ CCNA: 'מבחן CCNA', CCNP: 'מבחן CCNP', MIX: 'מבחן מעורב', WEAK: 'חיזוק נקודות חולשה' })[m];
@@ -212,43 +211,32 @@
     if (quiz.done) {
       const last = quiz.ans[quiz.ans.length - 1];
       if (last.ok) ex = `<div class="explain ok"><h4>✓ נכון! +${last.pts} נקודות</h4><div class="why">${md(q.e)}</div></div>`;
-      else ex = `<div class="explain bad"><h4>${last.timeout ? '⏱ נגמר הזמן' : '✗ תשובה שגויה'}</h4><div class="ans">התשובה הנכונה: ${LETTERS[it.ci]}. ${md(q.c)}</div><div class="why"><b>למה?</b> ${md(q.e)}</div></div>`;
+      else if (last.revealed) ex = `<div class="explain info"><h4>💡 התשובה הנכונה</h4><div class="ans">${LETTERS[it.ci]}. ${md(q.c)}</div><div class="why"><b>למה?</b> ${md(q.e)}</div></div>`;
+      else ex = `<div class="explain bad"><h4>✗ תשובה שגויה</h4><div class="ans">התשובה הנכונה: ${LETTERS[it.ci]}. ${md(q.c)}</div><div class="why"><b>למה?</b> ${md(q.e)}</div></div>`;
     }
     const btn = quiz.done
       ? `<button class="btn primary" data-act="next">${quiz.i + 1 < n ? 'לשאלה הבאה ←' : 'לתוצאות ←'}</button>`
-      : `<button class="btn primary" data-act="check" ${quiz.sel < 0 ? 'disabled' : ''}>בדוק תשובה</button>`;
+      : `<div class="row"><button class="btn reveal" data-act="reveal">💡 גלה לי את התשובה</button><button class="btn primary" data-act="check" ${quiz.sel < 0 ? 'disabled' : ''}>בדוק תשובה</button></div>`;
     return `<div class="screen" style="padding-bottom:20px">
       <div class="qhead"><div class="t"><h3>${modeName(quiz.mode)}</h3><button class="x" data-act="quit">${I.x}</button></div>
-      <div class="qmeta"><span>שאלה ${quiz.i + 1} מתוך ${n}</span>${quiz.streak >= 2 ? `<span class="streak">${I.bolt} רצף ${quiz.streak}</span>` : `<span>${fmt(quiz.pts)} נק׳</span>`}
-      <span class="timer ${quiz.t <= 10 && !quiz.done ? 'low' : ''}" id="tm">${I.clock}<span id="tv">${quiz.t}</span></span></div>
+      <div class="qmeta"><span>שאלה ${quiz.i + 1} מתוך ${n}</span>${quiz.streak >= 2 ? `<span class="streak">${I.bolt} רצף ${quiz.streak}</span>` : `<span></span>`}
+      <span class="timer">⭐ ${fmt(quiz.pts)}</span></div>
       <div class="pbar"><i style="width:${pct}%"></i></div></div>
       <div class="qcard" id="qc"><div class="chips"><span class="chip lv ${q.lv === 'CCNP' ? 'p' : ''}">${q.lv}</span><span class="chip">${esc(q.t)}</span></div>
       <div class="qtext"><span class="qnum">${quiz.i + 1}.</span>${md(q.q)}</div></div>
       <div class="opts">${opts}</div>${ex}<div class="qfoot">${btn}</div></div>`;
   }
-  function startTimer() {
-    clearInterval(timerId);
-    if (quiz.done) return;
-    timerId = setInterval(() => {
-      quiz.t--;
-      const tv = $('#tv'); if (tv) tv.textContent = quiz.t;
-      if (quiz.t <= 10) { const tm = $('#tm'); tm && tm.classList.add('low'); }
-      if (quiz.t <= 0) { clearInterval(timerId); answer(true); }
-    }, 1000);
-  }
-  function answer(timeout) {
-    clearInterval(timerId);
+  function answer(revealed) {
     const it = quiz.items[quiz.i], q = it.q;
-    const ok = !timeout && quiz.sel === it.ci;
+    const ok = !revealed && quiz.sel === it.ci;
     let pts = 0;
     if (ok) {
       quiz.streak++; quiz.best = Math.max(quiz.best, quiz.streak);
       pts = q.lv === 'CCNP' ? 15 : 10;
-      if (quiz.t >= 30) pts += 5; else if (quiz.t >= 15) pts += 2;
       if (quiz.streak >= 3) pts += Math.min(10, (quiz.streak - 2) * 2);
       quiz.pts += pts;
     } else quiz.streak = 0;
-    quiz.ans.push({ id: q.id, ok, sel: timeout ? -1 : quiz.sel, timeout: !!timeout, pts, it });
+    quiz.ans.push({ id: q.id, ok, sel: revealed ? -1 : quiz.sel, revealed: !!revealed, pts, it });
     S.seen[q.id] = 1; S.answered++;
     const tp = S.topic[q.t] || (S.topic[q.t] = { a: 0, c: 0 }); tp.a++; if (ok) tp.c++;
     S.level[q.lv].a++; if (ok) S.level[q.lv].c++;
@@ -256,10 +244,11 @@
     quiz.done = true;
     render();
     if (ok) { const g = document.createElement('div'); g.className = 'gain'; g.textContent = '+' + pts; document.body.appendChild(g); setTimeout(() => g.remove(), 1000); $('#qc').classList.add('pop'); vib(30); }
+    else if (revealed) { setTimeout(() => { const e = $('.explain'); e && e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 120); }
     else { $('#qc').classList.add('shake'); vib([60, 40, 60]); setTimeout(() => { const e = $('.explain'); e && e.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 120); }
   }
   function next() {
-    if (quiz.i + 1 < quiz.items.length) { quiz.i++; quiz.sel = -1; quiz.done = false; quiz.t = QTIME; render(); window.scrollTo(0, 0); }
+    if (quiz.i + 1 < quiz.items.length) { quiz.i++; quiz.sel = -1; quiz.done = false; render(); window.scrollTo(0, 0); }
     else finish();
   }
   function finish() {
@@ -284,19 +273,19 @@
   function resultView() {
     const r = quiz.result;
     const title = r.pct >= 90 ? 'מצוין! אתה מוכן למבחן' : r.pct >= 70 ? 'כל הכבוד!' : r.pct >= 50 ? 'לא רע – ממשיכים להתאמן' : 'צריך עוד קצת תרגול';
-    const wrong = quiz.ans.filter(a => !a.ok);
+    const wrong = quiz.ans.filter(a => !a.ok), revealedN = quiz.ans.filter(a => a.revealed).length;
     const rev = wrong.map(a => `<div class="review"><div class="q">${md(a.it.q.q)}</div>
-      <div class="your">${a.timeout ? '⏱ לא נענתה בזמן' : '✗ ענית: ' + md(a.it.opts[a.sel])}</div>
+      <div class="your">${a.revealed ? '💡 ביקשת לגלות את התשובה' : '✗ ענית: ' + md(a.it.opts[a.sel])}</div>
       <div class="right">✓ נכון: ${md(a.it.q.c)}</div><div class="why">${md(a.it.q.e)}</div></div>`).join('');
     return `<div class="screen" style="padding-bottom:30px"><div class="res-wrap">
       <div class="res" id="res"><div class="confetti" id="cf"></div>${I.bigTrophy}
       <h2>${title}</h2><div class="score">${r.pct}%</div>
-      <div class="sub">ענית נכון על <b>${r.c} מתוך ${r.n}</b> שאלות</div>
+      <div class="sub">ענית נכון על <b>${r.c} מתוך ${r.n}</b> שאלות${revealedN ? ` · ${revealedN} תשובות נחשפו` : ''}</div>
       <div class="res-grid"><div><b>+${fmt(quiz.pts)}</b><small>נקודות</small></div><div><b>${quiz.best}</b><small>רצף שיא</small></div><div><b>${Math.round(avg())}%</b><small>ממוצע כללי</small></div></div>
       ${quiz.bonus ? `<div class="sub" style="margin-top:6px">כולל בונוס של <b>${quiz.bonus}</b> נקודות על ציון גבוה 🎉</div>` : ''}</div>
       <div style="margin-top:14px" class="row"><button class="btn primary" data-act="again">מבחן נוסף</button><button class="btn ghost" data-act="shareRes">${I.share} שתף ואתגר</button></div>
       <button class="btn soft" style="margin-top:10px" data-go="home">לדף הבית</button>
-      ${wrong.length ? `<div class="sec-title" style="margin-top:22px"><h2>סקירת טעויות</h2><span>${wrong.length} שאלות</span></div>${rev}` : `<div class="empty">אין טעויות במבחן הזה – מושלם! 🏆</div>`}
+      ${wrong.length ? `<div class="sec-title" style="margin-top:22px"><h2>סקירת טעויות ותשובות שנחשפו</h2><span>${wrong.length} שאלות</span></div>${rev}` : `<div class="empty">אין טעויות במבחן הזה – מושלם! 🏆</div>`}
       </div></div>`;
   }
   function confetti() {
@@ -399,6 +388,7 @@
       if (a === 'start') startQuiz(false);
       else if (a === 'weak') startQuiz(true);
       else if (a === 'check') answer(false);
+      else if (a === 'reveal') answer(true);
       else if (a === 'next') next();
       else if (a === 'quit') confirmQuit();
       else if (a === 'again') startQuiz(quiz && quiz.mode === 'WEAK');
